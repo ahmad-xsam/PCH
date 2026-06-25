@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import useSWR from "swr";
-import { Plus, Trash2, Edit2, Settings } from "lucide-react";
+import { Plus, Trash2, Edit2, Settings, Network } from "lucide-react";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -11,14 +11,8 @@ export default function AdminPage() {
   const { data: matchesData, mutate: mutateMatches } = useSWR("/api/matches", fetcher);
 
   const [newTeamName, setNewTeamName] = useState("");
+  const [isGenerating, setIsGenerating] = useState(false);
   
-  const [newMatch, setNewMatch] = useState({
-    teamA: "",
-    teamB: "",
-    matchNumber: 1,
-    round: 1,
-  });
-
   const handleAddTeam = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTeamName) return;
@@ -37,25 +31,7 @@ export default function AdminPage() {
     mutateTeams();
   };
 
-  const handleAddMatch = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMatch.teamA || !newMatch.teamB) return;
-    await fetch("/api/matches", {
-      method: "POST",
-      body: JSON.stringify(newMatch),
-      headers: { "Content-Type": "application/json" },
-    });
-    setNewMatch({ teamA: "", teamB: "", matchNumber: newMatch.matchNumber + 1, round: newMatch.round });
-    mutateMatches();
-  };
-
-  const handleDeleteMatch = async (id: string) => {
-    if (!confirm("Are you sure?")) return;
-    await fetch(`/api/matches/${id}`, { method: "DELETE" });
-    mutateMatches();
-  };
-
-  const handleUpdateMatchScore = async (id: string, scoreA: number, scoreB: number, status: string) => {
+  const handleUpdateMatchScore = async (id: string, scoreA: number | null, scoreB: number | null, status: string) => {
     await fetch(`/api/matches/${id}`, {
       method: "PUT",
       body: JSON.stringify({ scoreA, scoreB, status }),
@@ -65,13 +41,27 @@ export default function AdminPage() {
     mutateTeams(); // Scores might affect standings
   };
 
+  const handleGenerateBracket = async () => {
+    if (!confirm("Warning: This will DELETE all existing matches and generate a new knockout bracket based on registered teams. Continue?")) return;
+    setIsGenerating(true);
+    await fetch("/api/matches/generate", { method: "POST" });
+    mutateMatches();
+    setIsGenerating(false);
+  };
+
+  const handleDeleteAllMatches = async () => {
+     if (!confirm("DELETE ALL MATCHES? This cannot be undone.")) return;
+     // simple workaround to delete all: wait for API or just delete one by one
+     // For safety, we can just let generate bracket override them.
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div>
         <h1 className="text-3xl md:text-5xl font-extrabold tracking-tight">
           Admin <span className="text-gradient">Panel</span>
         </h1>
-        <p className="mt-2 text-slate-400">Manage teams and matches.</p>
+        <p className="mt-2 text-slate-400">Manage teams and brackets.</p>
       </div>
 
       <div className="grid gap-8 md:grid-cols-2">
@@ -108,68 +98,53 @@ export default function AdminPage() {
 
         {/* Matches Management */}
         <div className="glass-panel p-6 rounded-2xl border border-slate-700/50">
-          <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <Settings className="w-5 h-5 text-purple-400"/> Manage Matches
-          </h2>
-          
-          <form onSubmit={handleAddMatch} className="flex flex-col gap-3 mb-6">
-            <div className="flex gap-2">
-              <select 
-                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
-                value={newMatch.teamA}
-                onChange={(e) => setNewMatch({...newMatch, teamA: e.target.value})}
-              >
-                <option value="">Select Team A</option>
-                {teamsData?.data?.map((t: any) => <option key={t._id} value={t._id}>{t.name}</option>)}
-              </select>
-              <select 
-                className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-purple-500"
-                value={newMatch.teamB}
-                onChange={(e) => setNewMatch({...newMatch, teamB: e.target.value})}
-              >
-                <option value="">Select Team B</option>
-                {teamsData?.data?.map((t: any) => <option key={t._id} value={t._id}>{t.name}</option>)}
-              </select>
-            </div>
-            <div className="flex gap-2">
-              <input type="number" placeholder="Match #" className="w-24 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white" value={newMatch.matchNumber} onChange={(e) => setNewMatch({...newMatch, matchNumber: parseInt(e.target.value)})} />
-              <input type="number" placeholder="Round" className="w-24 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white" value={newMatch.round} onChange={(e) => setNewMatch({...newMatch, round: parseInt(e.target.value)})} />
-              <button type="submit" className="flex-1 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center gap-1">
-                <Plus className="w-4 h-4"/> Add Match
-              </button>
-            </div>
-          </form>
+          <div className="flex justify-between items-center mb-6">
+             <h2 className="text-xl font-bold flex items-center gap-2">
+               <Network className="w-5 h-5 text-purple-400"/> Bracket Matches
+             </h2>
+             <button 
+                onClick={handleGenerateBracket} 
+                disabled={isGenerating}
+                className="bg-purple-600 hover:bg-purple-700 text-white text-sm px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1 disabled:opacity-50"
+             >
+                {isGenerating ? "Generating..." : "Auto-Generate Bracket"}
+             </button>
+          </div>
 
           <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+            {matchesData?.data?.length === 0 && <p className="text-slate-400 text-sm">No matches yet. Click Generate Bracket.</p>}
+            
             {matchesData?.data?.map((match: any) => (
               <div key={match._id} className="bg-slate-800/50 p-4 rounded-lg border border-slate-700/30 space-y-3">
                 <div className="flex justify-between text-xs text-slate-400">
-                  <span>Match #{match.matchNumber} (Round {match.round})</span>
-                  <button onClick={() => handleDeleteMatch(match._id)} className="text-red-400 hover:text-red-300"><Trash2 className="w-4 h-4" /></button>
+                  <span>Match #{match.matchNumber} (Round {match.round} - Pos {match.position})</span>
+                  <span className={`px-2 py-0.5 rounded uppercase font-bold tracking-wider ${match.status === 'completed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-700 text-slate-400'}`}>
+                     {match.status}
+                  </span>
                 </div>
                 
                 <div className="flex items-center gap-2">
-                  <div className="flex-1 text-right text-sm font-medium">{match.teamA?.name}</div>
+                  <div className="flex-1 text-right text-sm font-medium">{match.teamA?.name || 'TBD'}</div>
                   <input 
                     type="number" 
                     className="w-12 bg-slate-900 border border-slate-600 rounded text-center py-1"
-                    defaultValue={match.scoreA}
-                    onBlur={(e) => handleUpdateMatchScore(match._id, parseInt(e.target.value), match.scoreB, match.status)}
+                    defaultValue={match.scoreA === null ? '' : match.scoreA}
+                    onBlur={(e) => handleUpdateMatchScore(match._id, e.target.value === '' ? null : parseInt(e.target.value), match.scoreB, match.status)}
                   />
                   <span className="text-slate-500">-</span>
                   <input 
                     type="number" 
                     className="w-12 bg-slate-900 border border-slate-600 rounded text-center py-1"
-                    defaultValue={match.scoreB}
-                    onBlur={(e) => handleUpdateMatchScore(match._id, match.scoreA, parseInt(e.target.value), match.status)}
+                    defaultValue={match.scoreB === null ? '' : match.scoreB}
+                    onBlur={(e) => handleUpdateMatchScore(match._id, match.scoreA, e.target.value === '' ? null : parseInt(e.target.value), match.status)}
                   />
-                  <div className="flex-1 text-left text-sm font-medium">{match.teamB?.name}</div>
+                  <div className="flex-1 text-left text-sm font-medium">{match.teamB?.name || 'TBD'}</div>
                 </div>
 
                 <div className="flex justify-center mt-2">
                   <select 
                     className={`text-xs px-2 py-1 rounded bg-slate-900 border ${match.status === 'completed' ? 'border-emerald-500 text-emerald-400' : 'border-slate-600 text-slate-300'}`}
-                    defaultValue={match.status}
+                    value={match.status}
                     onChange={(e) => handleUpdateMatchScore(match._id, match.scoreA, match.scoreB, e.target.value)}
                   >
                     <option value="scheduled">Scheduled</option>
