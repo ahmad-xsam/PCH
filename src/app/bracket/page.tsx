@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import useSWR from "swr";
-import { GitMerge, Trophy, ZoomIn, ZoomOut, Maximize2, X, Play, Award, CheckCircle } from "lucide-react";
+import { GitMerge, Trophy, ZoomIn, ZoomOut, Maximize2, X, Play, Award, CheckCircle, Calendar, ArrowRight } from "lucide-react";
+import Link from "next/link";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -28,6 +29,7 @@ interface Match {
 export default function BracketPage() {
   const { data: matchesData, mutate: mutateMatches, isLoading: matchesLoading } = useSWR("/api/matches", fetcher);
   const { data: teamsData, mutate: mutateTeams } = useSWR("/api/teams", fetcher);
+  const { data: configData } = useSWR("/api/config", fetcher);
 
   // Pan & Zoom state
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -48,6 +50,7 @@ export default function BracketPage() {
 
   const teams: Team[] = teamsData?.data || [];
   const matches: Match[] = matchesData?.data || [];
+  const config = configData?.data || { tournamentType: "single-elimination", tournamentName: "PCH Cup Tournament" };
 
   // Group matches by round
   const rounds: { [key: number]: Match[] } = {};
@@ -138,31 +141,25 @@ export default function BracketPage() {
     );
   };
 
-  // Render a Single Match Card
   const renderMatchCard = (match: Match, side: "left" | "right" | "center") => {
     const isWinnerA = match.status === "completed" && match.scoreA !== null && match.scoreB !== null && match.scoreA > match.scoreB;
     const isWinnerB = match.status === "completed" && match.scoreA !== null && match.scoreB !== null && match.scoreB > match.scoreA;
 
     const hasTeamA = !!match.teamA;
     const hasTeamB = !!match.teamB;
-
-    // Check if it's the top or bottom branch of a pair (to draw connectors)
     const isTopBranch = match.position % 2 !== 0;
 
     return (
       <div key={match._id} className="relative py-6 flex flex-col justify-center items-center">
-        {/* Connector Line out of the card (except for Grand Final in the center) */}
         {side !== "center" && (
           <>
             {side === "left" ? (
-              // Left side flows Left-to-Right (connector goes right)
               <div
                 className={`absolute w-8 right-[-32px] border-r-2 border-slate-700
                   ${isTopBranch ? "top-[50%] h-[50%] border-t-2 rounded-tr-xl" : "bottom-[50%] h-[50%] border-b-2 rounded-br-xl"}
                 `}
               />
             ) : (
-              // Right side flows Right-to-Left (connector goes left)
               <div
                 className={`absolute w-8 left-[-32px] border-l-2 border-slate-700
                   ${isTopBranch ? "top-[50%] h-[50%] border-t-2 rounded-tl-xl" : "bottom-[50%] h-[50%] border-b-2 rounded-bl-xl"}
@@ -172,7 +169,6 @@ export default function BracketPage() {
           </>
         )}
 
-        {/* Match Card Container */}
         <div
           onClick={() => openEditor(match)}
           className={`match-card w-64 bg-slate-900/90 hover:bg-slate-800/80 hover:scale-[1.02] border transition-all duration-300 rounded-2xl overflow-hidden shadow-xl cursor-pointer ${
@@ -183,15 +179,14 @@ export default function BracketPage() {
               : "border-slate-800/80"
           }`}
         >
-          {/* Header */}
           <div className="bg-slate-950/75 px-3 py-1.5 text-[9px] text-slate-450 font-bold flex justify-between border-b border-slate-800/60">
             <span>MATCH #{match.matchNumber}</span>
             <span
               className={`uppercase tracking-widest font-black ${
                 match.status === "completed"
-                  ? "text-emerald-400"
+                  ? "text-emerald-450"
                   : match.status === "ongoing"
-                  ? "text-amber-400"
+                  ? "text-amber-450"
                   : "text-slate-500"
               }`}
             >
@@ -199,7 +194,6 @@ export default function BracketPage() {
             </span>
           </div>
 
-          {/* Slots */}
           <div className="flex flex-col">
             {/* Team A */}
             <div
@@ -221,8 +215,8 @@ export default function BracketPage() {
                   </>
                 ) : (
                   <>
-                    <div className="w-6 h-6 rounded-full bg-slate-850 border border-dashed border-slate-700 flex items-center justify-center text-slate-650 font-bold text-[8px]">BYE</div>
-                    <span className="text-xs text-slate-550 font-semibold italic">Bye/TBD</span>
+                    <div className="w-6 h-6 rounded-full bg-slate-850 border border-dashed border-slate-750 flex items-center justify-center text-slate-650 font-bold text-[8px]">BYE</div>
+                    <span className="text-xs text-slate-550 font-semibold italic">Bye / Pending</span>
                   </>
                 )}
               </div>
@@ -251,8 +245,8 @@ export default function BracketPage() {
                   </>
                 ) : (
                   <>
-                    <div className="w-6 h-6 rounded-full bg-slate-850 border border-dashed border-slate-700 flex items-center justify-center text-slate-650 font-bold text-[8px]">BYE</div>
-                    <span className="text-xs text-slate-550 font-semibold italic">Bye/TBD</span>
+                    <div className="w-6 h-6 rounded-full bg-slate-850 border border-dashed border-slate-750 flex items-center justify-center text-slate-650 font-bold text-[8px]">BYE</div>
+                    <span className="text-xs text-slate-550 font-semibold italic">Bye / Pending</span>
                   </>
                 )}
               </div>
@@ -266,82 +260,77 @@ export default function BracketPage() {
     );
   };
 
-  return (
-    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-700 h-screen flex flex-col overflow-hidden">
-      
-      {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-4 px-6 pt-4 shrink-0">
-        <div>
-          <h1 className="text-3xl font-extrabold tracking-tight">
-            Knockout <span className="text-gradient">Bracket Board</span>
-          </h1>
-          <p className="text-slate-400 text-xs">
-            Drag to pan, pinch/scroll to zoom. Click any match card to edit scores or assign teams directly!
+  // Render notice if configuration is Round Robin
+  if (config.tournamentType === "round-robin") {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 max-w-xl mx-auto space-y-6 animate-in fade-in duration-500">
+        <div className="w-16 h-16 bg-blue-500/10 border border-blue-500/20 rounded-full flex items-center justify-center text-blue-400 shadow-lg shadow-blue-500/5">
+          <Calendar className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-2xl font-extrabold text-white">Round Robin League Format</h2>
+          <p className="text-slate-400 text-sm leading-relaxed">
+            This tournament is currently configured as a <strong>Round Robin League</strong>. In this format, matches are structured in rounds rather than a bracket tree.
           </p>
         </div>
+        <Link
+          href="/"
+          className="flex items-center gap-2 bg-blue-650 text-white font-extrabold px-6 py-3 rounded-xl hover:bg-blue-600 transition-all shadow-lg shadow-blue-500/10 text-sm"
+        >
+          <span>View Matches & Standings</span>
+          <ArrowRight className="w-4 h-4" />
+        </Link>
+      </div>
+    );
+  }
 
-        {/* Canvas Toolbar Controls */}
-        <div className="flex gap-1 bg-slate-800/60 border border-slate-700/50 p-1 rounded-xl shrink-0">
-          <button
-            onClick={zoomIn}
-            className="btn-control p-2 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
-            title="Zoom In"
-          >
-            <ZoomIn className="w-4 h-4" />
-          </button>
-          <button
-            onClick={zoomOut}
-            className="btn-control p-2 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"
-            title="Zoom Out"
-          >
-            <ZoomOut className="w-4 h-4" />
-          </button>
-          <button
-            onClick={resetZoom}
-            className="btn-control p-2 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold px-3"
-            title="Reset Canvas View"
-          >
-            <Maximize2 className="w-3.5 h-3.5" />
-            <span>Fit View</span>
-          </button>
+  return (
+    <div className="space-y-6 h-full flex flex-col overflow-hidden animate-in fade-in duration-500">
+      
+      {/* Header */}
+      <div className="flex justify-between items-center px-2 shrink-0">
+        <div>
+          <h1 className="text-3xl font-extrabold flex items-center gap-2.5">
+            <GitMerge className="w-7 h-7 text-blue-450" /> Interactive Bracket Board
+          </h1>
+          <p className="text-xs text-slate-400 mt-1">
+            Drag to pan, scroll to zoom. Click matches to enter scores and manage details.
+          </p>
+        </div>
+        <div className="flex gap-1 bg-slate-800/80 border border-slate-700/50 p-1 rounded-xl shadow-lg">
+          <button onClick={zoomIn} className="btn-control p-2 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"><ZoomIn className="w-4 h-4" /></button>
+          <button onClick={zoomOut} className="btn-control p-2 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors"><ZoomOut className="w-4 h-4" /></button>
+          <button onClick={resetZoom} className="btn-control p-2 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg transition-colors flex items-center gap-1.5 text-xs font-bold px-3"><Maximize2 className="w-3.5 h-3.5" /><span>Fit</span></button>
         </div>
       </div>
 
-      {/* CANVAS CONTAINER */}
+      {/* Canvas */}
       <div
         ref={canvasRef}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
-        className={`flex-1 relative overflow-hidden bg-slate-950/80 border border-slate-800/80 rounded-2xl mx-6 mb-6 shadow-2xl cursor-grab ${
+        className={`flex-1 relative overflow-hidden bg-slate-950/80 border border-slate-800/85 rounded-3xl shadow-inner min-h-[500px] cursor-grab ${
           isDragging ? "cursor-grabbing" : ""
         }`}
         style={{
-          backgroundImage: `radial-gradient(rgba(100, 116, 139, 0.1) 1.5px, transparent 1.5px)`,
+          backgroundImage: `radial-gradient(rgba(100, 116, 139, 0.15) 1.5px, transparent 1.5px)`,
           backgroundSize: "24px 24px",
         }}
       >
-        {matchesLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center space-y-4">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-            <p className="text-slate-400 text-sm">Building tournament layout...</p>
-          </div>
-        ) : roundKeys.length === 0 ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500">
-            <GitMerge className="h-16 w-16 text-slate-750 mb-3" />
-            <p className="font-semibold text-sm">No Bracket Generated</p>
-            <p className="text-xs mt-1 text-slate-600">Please generate the bracket from the Admin Panel first.</p>
+        {matches.length === 0 ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-550">
+            <GitMerge className="h-16 w-16 text-slate-800 mb-2" />
+            <span className="text-xs">No bracket created. Please generate from the Admin Panel.</span>
           </div>
         ) : (
-          /* ZOOM & TRANSLATE LAYER */
           <div
             className="absolute origin-center transition-transform duration-75"
             style={{
               transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
               left: "50%",
               top: "50%",
-              // Offset by 50% to make center alignment around parent easier
               marginLeft: `-${(totalRounds * 2 + 1) * 150}px`,
               marginTop: "-300px",
               width: `${(totalRounds * 2 + 1) * 300}px`,
@@ -349,8 +338,7 @@ export default function BracketPage() {
             }}
           >
             <div className="flex h-full items-stretch justify-center relative select-none">
-              
-              {/* 1. LEFT WING: Round 1 up to Round R-1 */}
+              {/* Left Wing */}
               {Array.from({ length: totalRounds - 1 }).map((_, i) => {
                 const roundIndex = i + 1;
                 const matchesInRound = rounds[roundIndex] || [];
@@ -360,27 +348,23 @@ export default function BracketPage() {
 
                 return (
                   <div key={`left-round-${roundIndex}`} className="flex flex-col justify-around w-72 relative py-8 px-4">
-                    {/* Header */}
-                    <div className="absolute top-2 left-0 right-0 text-center font-black text-slate-400 uppercase tracking-widest text-[9px] pointer-events-none">
-                      Round {roundIndex} (Left)
-                    </div>
-                    {leftMatches.map((match) => renderMatchCard(match, "left"))}
+                    <div className="absolute top-2 left-0 right-0 text-center font-black text-slate-500 uppercase tracking-widest text-[9px]">Round {roundIndex}</div>
+                    {leftMatches.map((m) => renderMatchCard(m, "left"))}
                   </div>
                 );
               })}
 
-              {/* 2. CENTER WING: Grand Final (Round R) */}
+              {/* Center Final */}
               <div className="flex flex-col justify-center items-center w-80 relative py-8 px-4 border-x border-slate-900/40 bg-slate-950/20">
-                <div className="absolute top-2 left-0 right-0 text-center font-black text-gradient uppercase tracking-widest text-[10px] pointer-events-none flex items-center justify-center gap-1">
+                <div className="absolute top-2 left-0 right-0 text-center font-black text-gradient uppercase tracking-widest text-[10px] flex items-center justify-center gap-1">
                   <Trophy className="w-3.5 h-3.5 text-yellow-500" /> Grand Final
                 </div>
-
-                {rounds[totalRounds]?.map((match) => renderMatchCard(match, "center"))}
+                {rounds[totalRounds]?.map((m) => renderMatchCard(m, "center"))}
               </div>
 
-              {/* 3. RIGHT WING: Round R-1 down to Round 1 (Reversed visual layout) */}
+              {/* Right Wing (Reversed) */}
               {Array.from({ length: totalRounds - 1 })
-                .map((_, i) => totalRounds - 1 - i) // Reverses round order (R-1 down to 1)
+                .map((_, i) => totalRounds - 1 - i)
                 .map((roundIndex) => {
                   const matchesInRound = rounds[roundIndex] || [];
                   const rightMatches = matchesInRound
@@ -389,117 +373,121 @@ export default function BracketPage() {
 
                   return (
                     <div key={`right-round-${roundIndex}`} className="flex flex-col justify-around w-72 relative py-8 px-4">
-                      {/* Header */}
-                      <div className="absolute top-2 left-0 right-0 text-center font-black text-slate-400 uppercase tracking-widest text-[9px] pointer-events-none">
-                        Round {roundIndex} (Right)
-                      </div>
-                      {rightMatches.map((match) => renderMatchCard(match, "right"))}
+                      <div className="absolute top-2 left-0 right-0 text-center font-black text-slate-500 uppercase tracking-widest text-[9px]">Round {roundIndex}</div>
+                      {rightMatches.map((m) => renderMatchCard(m, "right"))}
                     </div>
                   );
                 })}
-
             </div>
           </div>
         )}
       </div>
 
-      {/* INLINE EDIT MODAL */}
+      {/* --- INLINE EDIT MODAL --- */}
       {editingMatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div className="glass-panel p-6 rounded-2xl border border-slate-700 max-w-md w-full mx-4 shadow-2xl relative animate-in scale-in duration-300">
-            <button
-              onClick={() => setEditingMatch(null)}
-              className="absolute top-4 right-4 text-slate-400 hover:text-white p-1"
-            >
-              <X className="w-5 h-5" />
-            </button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-md overflow-hidden bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl animate-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="bg-slate-950/60 px-6 py-4 flex justify-between items-center border-b border-slate-800">
+              <div>
+                <h3 className="font-extrabold text-white text-md">Edit Match #{editingMatch.matchNumber}</h3>
+                <p className="text-[10px] text-slate-500 font-bold uppercase mt-0.5">Round {editingMatch.round} • Position {editingMatch.position}</p>
+              </div>
+              <button onClick={() => setEditingMatch(null)} className="p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-all">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
 
-            <h3 className="text-lg font-black mb-4 flex items-center gap-2 text-white">
-              <GitMerge className="w-5 h-5 text-blue-400" /> Manage Match #{editingMatch.matchNumber}
-            </h3>
+            <form onSubmit={handleSaveMatch} className="p-6 space-y-5">
+              {/* Teams & Scores Editor */}
+              <div className="space-y-4">
+                {/* Team A Selection & Score */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-450 uppercase tracking-wider">Team A (Top)</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedTeamA}
+                      onChange={(e) => setSelectedTeamA(e.target.value)}
+                      className="flex-1 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">-- Bye / TBD --</option>
+                      {teams.map((t) => (
+                        <option key={t._id} value={t._id}>{t.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="Score"
+                      value={scoreA}
+                      onChange={(e) => setScoreA(e.target.value)}
+                      className="w-20 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-center text-xs font-bold font-mono focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
 
-            <form onSubmit={handleSaveMatch} className="space-y-4">
-              
-              {/* TEAM A DROPDOWN & SCORE */}
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-400 uppercase">Team A (Top)</label>
-                <div className="flex gap-2">
-                  <select
-                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                    value={selectedTeamA}
-                    onChange={(e) => setSelectedTeamA(e.target.value)}
-                  >
-                    <option value="">-- Bye / Empty --</option>
-                    {teams.map((t) => (
-                      <option key={t._id} value={t._id}>
-                        {t.name} (Draw #{t.drawNumber})
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="number"
-                    placeholder="Score"
-                    className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-center text-xs font-bold font-mono text-white focus:outline-none"
-                    value={scoreA}
-                    onChange={(e) => setScoreA(e.target.value)}
-                  />
+                {/* Team B Selection & Score */}
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-black text-slate-450 uppercase tracking-wider">Team B (Bottom)</label>
+                  <div className="flex gap-2">
+                    <select
+                      value={selectedTeamB}
+                      onChange={(e) => setSelectedTeamB(e.target.value)}
+                      className="flex-1 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">-- Bye / TBD --</option>
+                      {teams.map((t) => (
+                        <option key={t._id} value={t._id}>{t.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="Score"
+                      value={scoreB}
+                      onChange={(e) => setScoreB(e.target.value)}
+                      className="w-20 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl px-3 py-2 text-center text-xs font-bold font-mono focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
                 </div>
               </div>
 
-              {/* TEAM B DROPDOWN & SCORE */}
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-400 uppercase">Team B (Bottom)</label>
-                <div className="flex gap-2">
-                  <select
-                    className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                    value={selectedTeamB}
-                    onChange={(e) => setSelectedTeamB(e.target.value)}
-                  >
-                    <option value="">-- Bye / Empty --</option>
-                    {teams.map((t) => (
-                      <option key={t._id} value={t._id}>
-                        {t.name} (Draw #{t.drawNumber})
-                      </option>
-                    ))}
-                  </select>
-
-                  <input
-                    type="number"
-                    placeholder="Score"
-                    className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-center text-xs font-bold font-mono text-white focus:outline-none"
-                    value={scoreB}
-                    onChange={(e) => setScoreB(e.target.value)}
-                  />
+              {/* Status */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-black text-slate-450 uppercase tracking-wider">Match Status</label>
+                <div className="grid grid-cols-3 gap-1 bg-slate-950 p-1 border border-slate-800 rounded-xl">
+                  {(["scheduled", "ongoing", "completed"] as const).map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setMatchStatus(status)}
+                      className={`py-1.5 text-[10px] font-bold uppercase rounded-lg tracking-wider transition-all ${
+                        matchStatus === status
+                          ? status === "completed"
+                            ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/20"
+                            : status === "ongoing"
+                            ? "bg-amber-500/15 text-amber-400 border border-amber-500/20"
+                            : "bg-blue-500/15 text-blue-400 border border-blue-500/20"
+                          : "text-slate-500 hover:text-slate-300"
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ))}
                 </div>
               </div>
 
-              {/* STATUS SELECTOR */}
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-400 uppercase">Match Status</label>
-                <select
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-                  value={matchStatus}
-                  onChange={(e) => setMatchStatus(e.target.value as any)}
-                >
-                  <option value="scheduled">Scheduled</option>
-                  <option value="ongoing">🟢 Live / Ongoing</option>
-                  <option value="completed">🏆 Completed (Save updates standing & advances winner)</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-2 border-t border-slate-800 pt-4 mt-3">
+              {/* Action Buttons */}
+              <div className="flex gap-2 pt-2 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setEditingMatch(null)}
-                  className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs px-4 py-2.5 rounded-lg font-bold transition-colors text-slate-300"
+                  className="flex-1 bg-slate-800 hover:bg-slate-750 text-slate-300 font-extrabold py-2.5 rounded-xl transition-all text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSaving}
-                  className="bg-blue-600 hover:bg-blue-700 text-xs px-5 py-2.5 rounded-lg font-bold text-white transition-colors"
+                  className="flex-1 bg-blue-650 hover:bg-blue-600 text-white font-extrabold py-2.5 rounded-xl transition-all disabled:opacity-50 text-xs shadow-lg shadow-blue-500/10"
                 >
                   {isSaving ? "Saving..." : "Save Match"}
                 </button>

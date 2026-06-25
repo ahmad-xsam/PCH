@@ -3,60 +3,71 @@ import dbConnect from '@/lib/mongodb';
 import Match from '@/models/Match';
 import Team from '@/models/Team';
 
+export const dynamic = 'force-dynamic';
+
+async function recalculateTeamStats() {
+  // 1. Reset all teams to 0
+  await Team.updateMany({}, { wins: 0, losses: 0, points: 0 });
+
+  // 2. Fetch all completed matches
+  const completedMatches = await Match.find({ status: 'completed' });
+
+  // 3. Update stats for each completed match
+  for (const match of completedMatches) {
+    if (match.teamA && match.teamB) {
+      if (match.scoreA !== null && match.scoreB !== null) {
+        if (match.scoreA > match.scoreB) {
+          await Team.findByIdAndUpdate(match.teamA, { $inc: { wins: 1, points: 3 } });
+          await Team.findByIdAndUpdate(match.teamB, { $inc: { losses: 1 } });
+        } else if (match.scoreB > match.scoreA) {
+          await Team.findByIdAndUpdate(match.teamB, { $inc: { wins: 1, points: 3 } });
+          await Team.findByIdAndUpdate(match.teamA, { $inc: { losses: 1 } });
+        }
+      }
+    }
+  }
+}
+
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     await dbConnect();
     const id = (await params).id;
     const body = await request.json();
-    const match = await Match.findByIdAndUpdate(id, body, { new: true, runValidators: true });
     
+    const match = await Match.findByIdAndUpdate(id, body, { new: true, runValidators: true });
     if (!match) return NextResponse.json({ success: false, error: 'Match not found' }, { status: 404 });
 
-    // Logic to update team stats and advance winner to next match if completed
+    let winnerId = null;
     if (match.status === 'completed') {
-      const teamA = await Team.findById(match.teamA);
-      const teamB = await Team.findById(match.teamB);
-      
-      let winnerId = null;
-
-      if (teamA && teamB) {
-        // Simple win detection based on score
+      if (match.teamA && match.teamB && match.scoreA !== null && match.scoreB !== null) {
         if (match.scoreA > match.scoreB) {
-          winnerId = teamA._id;
-          teamA.wins += 1;
-          teamA.points += 3;
-          teamB.losses += 1;
+          winnerId = match.teamA.toString();
         } else if (match.scoreB > match.scoreA) {
-          winnerId = teamB._id;
-          teamB.wins += 1;
-          teamB.points += 3;
-          teamA.losses += 1;
+          winnerId = match.teamB.toString();
         }
-        await teamA.save();
-        await teamB.save();
-      } else if (teamA && !teamB) {
-         // Walkover for Team A
-         winnerId = teamA._id;
-      } else if (teamB && !teamA) {
-         // Walkover for Team B
-         winnerId = teamB._id;
+      } else if (match.teamA && !match.teamB) {
+        winnerId = match.teamA.toString();
+      } else if (match.teamB && !match.teamA) {
+        winnerId = match.teamB.toString();
       }
 
-      // Advance winner to next match
+      // Advance winner to next match if single elimination
       if (winnerId && match.nextMatchId) {
         const nextMatch = await Match.findById(match.nextMatchId);
         if (nextMatch) {
-          // If position is odd, winner goes to teamA. If even, winner goes to teamB.
-          // Or we can check which slot is empty.
-          if (!nextMatch.teamA || nextMatch.teamA.toString() === winnerId.toString() || (match.position % 2 !== 0)) {
-             nextMatch.teamA = winnerId;
+          const isTopBranch = match.position % 2 !== 0;
+          if (isTopBranch) {
+            nextMatch.teamA = winnerId;
           } else {
-             nextMatch.teamB = winnerId;
+            nextMatch.teamB = winnerId;
           }
           await nextMatch.save();
         }
       }
     }
+
+    // Recalculate stats globally for all teams to keep everything in sync
+    await recalculateTeamStats();
 
     return NextResponse.json({ success: true, data: match });
   } catch (error: any) {
@@ -70,6 +81,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     const id = (await params).id;
     const deletedMatch = await Match.findByIdAndDelete(id);
     if (!deletedMatch) return NextResponse.json({ success: false, error: 'Match not found' }, { status: 404 });
+    
+    await recalculateTeamStats();
     return NextResponse.json({ success: true, data: {} });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 400 });

@@ -2,6 +2,9 @@ import { NextResponse } from 'next/server';
 import dbConnect from '@/lib/mongodb';
 import Match from '@/models/Match';
 import Team from '@/models/Team';
+import Config from '@/models/Config';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST() {
   try {
@@ -10,17 +13,70 @@ export async function POST() {
     // Clear existing matches
     await Match.deleteMany({});
     
-    // Find teams sorted by drawNumber
-    const teams = await Team.find({}).sort({ drawNumber: 1 });
+    // Reset team match stats
+    await Team.updateMany({}, { wins: 0, losses: 0, points: 0 });
+
+    // Fetch tournament configuration
+    const configDoc = await Config.findOne({ key: 'tournamentType' });
+    const tournamentType = configDoc ? configDoc.value : 'single-elimination';
+
+    const teams = await Team.find({}).sort({ name: 1 });
     if (teams.length < 2) {
       return NextResponse.json(
-        { success: false, error: 'At least 2 teams are required to generate a bracket' },
+        { success: false, error: 'At least 2 teams are required to generate schedules' },
         { status: 400 }
       );
     }
 
-    // Check if any team has drawNumber missing
-    const missingDraw = teams.some(t => t.drawNumber === null || t.drawNumber === undefined);
+    // --- ROUND ROBIN GENERATION ---
+    if (tournamentType === 'round-robin') {
+      const list = [...teams];
+      const isOdd = list.length % 2 !== 0;
+      if (isOdd) {
+        // We push a dummy null to represent a bye
+        list.push(null as any);
+      }
+      
+      const N = list.length;
+      const roundsCount = N - 1;
+      const matchesPerRound = N / 2;
+      let matchCounter = 1;
+
+      for (let r = 1; r <= roundsCount; r++) {
+        for (let i = 0; i < matchesPerRound; i++) {
+          const teamA = list[i];
+          const teamB = list[N - 1 - i];
+
+          // If it is not a bye match
+          if (teamA && teamB) {
+            await Match.create({
+              round: r,
+              position: i + 1,
+              matchNumber: matchCounter++,
+              teamA: teamA._id,
+              teamB: teamB._id,
+              scoreA: null,
+              scoreB: null,
+              status: 'scheduled',
+              nextMatchId: null
+            });
+          }
+        }
+        // Rotate teams (Circle Method)
+        // Shift last item to the second position
+        const rotated = [list[0], list[N - 1], ...list.slice(1, N - 1)];
+        for (let idx = 0; idx < N; idx++) {
+          list[idx] = rotated[idx];
+        }
+      }
+
+      return NextResponse.json({ success: true, message: 'Round Robin league schedule generated successfully!' });
+    }
+
+    // --- SINGLE ELIMINATION BRACKET GENERATION ---
+    // Sort teams by drawNumber
+    const bracketTeams = await Team.find({}).sort({ drawNumber: 1 });
+    const missingDraw = bracketTeams.some(t => t.drawNumber === null || t.drawNumber === undefined);
     if (missingDraw) {
       return NextResponse.json(
         { success: false, error: 'Please perform the Random Draw in the Draw page before generating the bracket.' },
@@ -28,10 +84,7 @@ export async function POST() {
       );
     }
 
-    // Reset team match stats
-    await Team.updateMany({}, { wins: 0, losses: 0, points: 0 });
-
-    const numTeams = teams.length;
+    const numTeams = bracketTeams.length;
     
     // Find next power of 2 (P)
     let powerOf2 = 2;
@@ -51,7 +104,7 @@ export async function POST() {
         roundMatches.push({
           round: r,
           position: pos,
-          matchNumber: 0, // Assigned below
+          matchNumber: 0,
           teamA: null,
           teamB: null,
           scoreA: null,
@@ -63,7 +116,7 @@ export async function POST() {
       bracket.push(roundMatches);
     }
     
-    // 2. Assign match numbers sequentially across the tournament (1 to N)
+    // 2. Assign match numbers sequentially
     for (let r = 0; r < bracket.length; r++) {
       for (let m = 0; m < bracket[r].length; m++) {
         bracket[r][m].matchNumber = matchCounter++;
@@ -71,12 +124,9 @@ export async function POST() {
     }
 
     // 3. Save matches to DB from Final (root) to Round 1 (leaves)
-    // This allows linking nextMatchId correctly
     for (let r = bracket.length - 1; r >= 0; r--) {
       for (let m = 0; m < bracket[r].length; m++) {
         const matchData = bracket[r][m];
-        
-        // Link to next match if not final
         if (r < bracket.length - 1) {
           const nextMatchPos = Math.floor(m / 2);
           const nextMatch = bracket[r + 1][nextMatchPos];
@@ -84,19 +134,17 @@ export async function POST() {
         }
 
         const createdMatch = await Match.create(matchData);
-        bracket[r][m]._id = createdMatch._id; // save ID for referencing in child matches
+        bracket[r][m]._id = createdMatch._id;
       }
     }
 
-    // 4. Distribute Teams into Round 1 (bracket[0])
-    const M = bracket[0].length; // Number of matches in Round 1
-    const B = powerOf2 - numTeams; // Number of byes needed
+    // 4. Distribute Teams into Round 1
+    const M = bracket[0].length;
+    const B = powerOf2 - numTeams;
 
-    // Determine which match indices in Round 1 will contain a bye
     const byeMatchIndices = new Set<number>();
     if (B > 0) {
       for (let i = 0; i < B; i++) {
-        // Distribute byes evenly across the Round 1 matches
         const index = Math.floor((i * M) / B);
         byeMatchIndices.add(index);
       }
@@ -109,16 +157,14 @@ export async function POST() {
         const hasBye = byeMatchIndices.has(m);
 
         if (hasBye) {
-          // If match contains a bye, team A automatically wins and advances
-          matchDoc.teamA = teams[teamIndex++]?._id || null;
-          matchDoc.teamB = null; // Bye
+          matchDoc.teamA = bracketTeams[teamIndex++]?._id || null;
+          matchDoc.teamB = null;
           matchDoc.scoreA = 1;
           matchDoc.scoreB = 0;
           matchDoc.status = 'completed';
         } else {
-          // Normal Match
-          matchDoc.teamA = teams[teamIndex++]?._id || null;
-          matchDoc.teamB = teams[teamIndex++]?._id || null;
+          matchDoc.teamA = bracketTeams[teamIndex++]?._id || null;
+          matchDoc.teamB = bracketTeams[teamIndex++]?._id || null;
           matchDoc.scoreA = null;
           matchDoc.scoreB = null;
           matchDoc.status = 'scheduled';
@@ -126,12 +172,9 @@ export async function POST() {
 
         await matchDoc.save();
 
-        // Auto-advance the winner to the next round if it was a bye match
         if (matchDoc.status === 'completed' && matchDoc.teamA && matchDoc.nextMatchId) {
           const nextMatch = await Match.findById(matchDoc.nextMatchId);
           if (nextMatch) {
-            // Even matches (m = 0, 2, 4...) feed into nextMatch.teamA
-            // Odd matches (m = 1, 3, 5...) feed into nextMatch.teamB
             if (m % 2 === 0) {
               nextMatch.teamA = matchDoc.teamA;
             } else {
@@ -143,7 +186,7 @@ export async function POST() {
       }
     }
 
-    return NextResponse.json({ success: true, message: 'Bracket generated successfully' });
+    return NextResponse.json({ success: true, message: 'Single Elimination knockout bracket generated successfully!' });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 400 });
   }
