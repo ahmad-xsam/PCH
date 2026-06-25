@@ -1,6 +1,9 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017/pch-cup";
+// FALLBACK langsung ke Atlas URI Anda agar otomatis jalan di Vercel tanpa perlu setting tambahan.
+// PERINGATAN: Karena kode ini di-push ke GitHub, pastikan repository GitHub Anda disetel ke PRIVATE
+// agar password database Anda tidak dilihat oleh orang lain.
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb+srv://ahmadsamsudin27_db_user:ahmadsamsudin27_db_user@cluster0.pe488oz.mongodb.net/pch-cup?appName=Cluster0";
 
 let cached = (global as any).mongoose;
 
